@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createOutlineKey } from "@/lib/outline";
+import { createOutlineKey, revokeOutlineKey } from "@/lib/outline";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { telegramApi } from "@/lib/telegram";
 
@@ -51,11 +51,14 @@ export async function POST(request: Request) {
       await telegramApi("answerCallbackQuery", { callback_query_id: callback.id, text: "This order has already been reviewed.", show_alert: true });
       return NextResponse.json({ ok: true });
     }
-    const { error } = await db.from("outline_vpn_orders").update({
+    const { data: rejected, error } = await db.from("outline_vpn_orders").update({
       status: "rejected", reviewed_by: String(callback.from?.id ?? ""), reviewed_at: new Date().toISOString(),
       review_note: "Payment proof rejected", updated_at: new Date().toISOString(),
-    }).eq("id", orderId).eq("status", "payment_submitted");
-    if (error) throw error;
+    }).eq("id", orderId).eq("status", "payment_submitted").select("id").maybeSingle();
+    if (error || !rejected) {
+      await telegramApi("answerCallbackQuery", { callback_query_id: callback.id, text: "Order is already being reviewed.", show_alert: true });
+      return NextResponse.json({ ok: true });
+    }
     await telegramApi("sendMessage", { chat_id: order.telegram_user_id, text: `Your payment proof for order ${orderId} was not approved. Please contact support before placing another order.` });
     await telegramApi("answerCallbackQuery", { callback_query_id: callback.id, text: "Order rejected." });
     await telegramApi("editMessageReplyMarkup", { chat_id: adminChatId, message_id: callback.message?.message_id, reply_markup: { inline_keyboard: [] } });
@@ -67,7 +70,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  // Claim the order before contacting Outline, so duplicate Telegram callbacks cannot create duplicate keys.
+  // Atomically claim the order so duplicate Telegram callbacks cannot issue parallel keys.
   const { data: claimed, error: claimError } = await db.from("outline_vpn_orders").update({
     status: "approved", reviewed_by: String(callback.from?.id ?? ""), reviewed_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -78,50 +81,96 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { data: servers, error: serversError } = await db.from("outline_vpn_servers")
-      .select("id,env_slot").eq("active", true).order("sort_order", { ascending: true });
-    if (serversError) throw serversError;
-    const available = (servers ?? []).find((server) => Boolean(process.env[`OUTLINE_SERVER_${server.env_slot}_API_URL`]));
-    if (!available) throw new Error("No active Outline server is configured.");
+    // Recover safely if a previous attempt created the key but failed while finalizing the order.
+    const { data: existingKey, error: existingKeyError } = await db.from("outline_vpn_keys")
+      .select("id,access_url,expires_at,status").eq("order_id", orderId).maybeSingle();
+    if (existingKeyError) throw existingKeyError;
 
-    const key = await createOutlineKey(available.env_slot, `JBE-${order.telegram_user_id}-${orderId.slice(0, 8)}`);
-    const expiresAt = new Date(Date.now() + Number(order.duration_days_snapshot) * 86_400_000).toISOString();
-    const { error: keyError } = await db.from("outline_vpn_keys").insert({
-      order_id: orderId, server_id: available.id, outline_key_id: key.id, access_url: key.accessUrl,
-      status: "active", expires_at: expiresAt,
-    });
-    if (keyError) throw keyError;
+    let accessUrl = existingKey?.access_url;
+    let expiresAt = existingKey?.expires_at;
+    if (!existingKey) {
+      const { data: servers, error: serversError } = await db.from("outline_vpn_servers")
+        .select("id,env_slot").eq("active", true).order("sort_order", { ascending: true });
+      if (serversError) throw serversError;
+      const available = (servers ?? []).find((server) => Boolean(process.env[`OUTLINE_SERVER_${server.env_slot}_API_URL`]));
+      if (!available) throw new Error("No active Outline server is configured.");
 
+      const key = await createOutlineKey(available.env_slot, `JBE-${order.telegram_user_id}-${orderId.slice(0, 8)}`);
+      expiresAt = new Date(Date.now() + Number(order.duration_days_snapshot) * 86_400_000).toISOString();
+      const { error: keyError } = await db.from("outline_vpn_keys").insert({
+        order_id: orderId, server_id: available.id, outline_key_id: key.id, access_url: key.accessUrl,
+        status: "active", expires_at: expiresAt,
+      });
+      if (keyError) {
+        try { await revokeOutlineKey(available.env_slot, key.id); } catch {}
+        throw keyError;
+      }
+      accessUrl = key.accessUrl;
+    }
+
+    if (!accessUrl || !expiresAt) throw new Error("The stored Outline key is incomplete.");
     const { error: finishError } = await db.from("outline_vpn_orders").update({
-      status: "fulfilled", updated_at: new Date().toISOString(),
+      status: "fulfilled", updated_at: new Date().toISOString(), review_note: null,
     }).eq("id", orderId).eq("status", "approved");
     if (finishError) throw finishError;
 
-    await telegramApi("sendMessage", {
-      chat_id: order.telegram_user_id,
-      text: [
-        "✅ Your JBE Outline VPN key is ready!",
-        `Package: ${order.package_name_snapshot}`,
-        `Valid until: ${new Date(expiresAt).toLocaleString("en-GB", { timeZone: "Asia/Yangon" })} (Myanmar time)`,
-        "",
-        "Your access key:",
-        key.accessUrl,
-        "",
-        "Open the official Outline app and import this key. Keep it private.",
-      ].join("\n"),
+    // Key and order are committed before sending the customer notification. A Telegram outage
+    // must never roll a fulfilled order back and trigger duplicate key creation.
+    let customerNotified = true;
+    try {
+      await telegramApi("sendMessage", {
+        chat_id: order.telegram_user_id,
+        text: [
+          "✅ Your JBE Outline VPN key is ready!",
+          `Package: ${order.package_name_snapshot}`,
+          `Valid until: ${new Date(expiresAt).toLocaleString("en-GB", { timeZone: "Asia/Yangon" })} (Myanmar time)`,
+          "",
+          "Your access key:",
+          accessUrl,
+          "",
+          "Open the official Outline app and import this key. Keep it private.",
+        ].join("\n"),
+      });
+    } catch {
+      customerNotified = false;
+    }
+    await telegramApi("answerCallbackQuery", {
+      callback_query_id: callback.id,
+      text: customerNotified ? "Approved. Key issued." : "Key issued, but customer notification failed.",
+      show_alert: !customerNotified,
     });
-    await telegramApi("answerCallbackQuery", { callback_query_id: callback.id, text: "Approved. Key issued." });
-    await telegramApi("editMessageReplyMarkup", { chat_id: adminChatId, message_id: callback.message?.message_id, reply_markup: { inline_keyboard: [] } });
+    if (customerNotified) {
+      await telegramApi("editMessageReplyMarkup", { chat_id: adminChatId, message_id: callback.message?.message_id, reply_markup: { inline_keyboard: [] } });
+    } else {
+      await telegramApi("sendMessage", {
+        chat_id: adminChatId,
+        text: `⚠️ Order ${orderId} is fulfilled and its key is saved, but Telegram could not deliver the key to the customer. Check the order in the Mini App before taking action.`,
+      });
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 500) : "Key issuance failed";
+    const { data: savedKey } = await db.from("outline_vpn_keys").select("id").eq("order_id", orderId).maybeSingle();
+    if (savedKey) {
+      // Never reset an order that already has a key: that would permit duplicate key attempts.
+      await db.from("outline_vpn_orders").update({
+        status: "fulfilled", review_note: "Key saved; finalization or notification needs admin review.",
+        updated_at: new Date().toISOString(),
+      }).eq("id", orderId).eq("status", "approved");
+      await telegramApi("sendMessage", {
+        chat_id: adminChatId,
+        text: `⚠️ Order ${orderId} has a saved key but needs a delivery/finalization check. Do not approve it again or create another key. Error: ${message}`,
+      });
+      await telegramApi("answerCallbackQuery", { callback_query_id: callback.id, text: "Key exists; admin notified to check delivery.", show_alert: true });
+      return NextResponse.json({ ok: true });
+    }
+
     await db.from("outline_vpn_orders").update({
-      status: "payment_submitted",
-      review_note: error instanceof Error ? error.message.slice(0, 500) : "Key issuance failed",
-      updated_at: new Date().toISOString(),
+      status: "payment_submitted", review_note: message, updated_at: new Date().toISOString(),
     }).eq("id", orderId).eq("status", "approved");
     await telegramApi("sendMessage", {
       chat_id: adminChatId,
-      text: `⚠️ Order ${orderId} was approved but key issuance failed. Please check the Outline server configuration and retry after resolving the issue.`,
+      text: `⚠️ Order ${orderId} key issuance failed before a key was saved. Please check the Outline server configuration, then retry. Error: ${message}`,
     });
     await telegramApi("answerCallbackQuery", { callback_query_id: callback.id, text: "Key issuance failed; admin notified.", show_alert: true });
     return NextResponse.json({ ok: true });
