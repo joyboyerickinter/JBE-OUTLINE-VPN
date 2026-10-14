@@ -115,7 +115,7 @@ export default function Home() {
       <header className="topbar">
         <Link className="brand" href="/" aria-label="JBE Outline VPN home">
           <span className="brand-mark">J</span><span>JBE <b>OUTLINE</b></span>
-        </a>
+        </Link>
         <span className="status-pill"><i /> VPN ACCESS</span>
       </header>
 
