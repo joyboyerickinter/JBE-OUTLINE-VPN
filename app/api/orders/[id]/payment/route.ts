@@ -7,9 +7,11 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   let uploadedPath: string | null = null;
+  let orderIdForRollback: string | null = null;
   try {
     const user = validateTelegramInitData(readInitData(request));
     const { id } = await context.params;
+    orderIdForRollback = id;
     if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Invalid order." }, { status: 400 });
 
     const form = await request.formData();
@@ -39,10 +41,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
     if (uploadError) throw uploadError;
 
-    const { error: updateError } = await db.from("outline_vpn_orders").update({
+    const { data: updatedOrder, error: updateError } = await db.from("outline_vpn_orders").update({
       payment_proof_path: uploadedPath, status: "payment_submitted", updated_at: new Date().toISOString(),
-    }).eq("id", id).eq("status", "awaiting_payment");
+    }).eq("id", id).eq("status", "awaiting_payment").select("id").maybeSingle();
     if (updateError) throw updateError;
+    if (!updatedOrder) throw new Error("This order is no longer waiting for payment proof.");
 
     const adminChat = process.env.TELEGRAM_ADMIN_CHAT_ID;
     if (!adminChat) throw new Error("Admin Telegram chat is not configured.");
@@ -71,7 +74,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ success: true, message: "Payment proof sent for admin review." }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (uploadedPath) {
-      try { await supabaseAdmin().storage.from("outline-vpn-payment-proofs").remove([uploadedPath]); } catch {}
+      try {
+        const db = supabaseAdmin();
+        if (orderIdForRollback) {
+          await db.from("outline_vpn_orders").update({
+            payment_proof_path: null, status: "awaiting_payment", updated_at: new Date().toISOString(),
+          }).eq("id", orderIdForRollback).eq("status", "payment_submitted").eq("payment_proof_path", uploadedPath);
+        }
+        await db.storage.from("outline-vpn-payment-proofs").remove([uploadedPath]);
+      } catch {}
     }
     const message = error instanceof Error ? error.message : "Upload failed.";
     const authError = /Telegram|session|signature|Open this app/i.test(message);
