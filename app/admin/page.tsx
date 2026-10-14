@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 
 declare global {
   interface Window {
@@ -88,8 +89,8 @@ export default function AdminPage() {
   }
 
   return <main className="page-shell admin-shell">
-    <header className="topbar"><a className="brand" href="/"><span className="brand-mark">J</span><span>JBE <b>OUTLINE</b></span></a><span className="status-pill"><i /> ADMIN SETTINGS</span></header>
-    <section className="admin-intro"><p className="eyebrow"><span /> PRIVATE CONTROL PANEL</p><h1>Shop settings<span>.</span></h1><p>Manage the customer-facing packages, MMK prices, and payment accounts. Server secrets remain in Vercel environment variables.</p><a href="/" className="back-link">← Back to shop</a></section>
+    <header className="topbar"><Link className="brand" href="/"><span className="brand-mark">J</span><span>JBE <b>OUTLINE</b></span></Link><span className="status-pill"><i /> ADMIN SETTINGS</span></header>
+    <section className="admin-intro"><p className="eyebrow"><span /> PRIVATE CONTROL PANEL</p><h1>Shop settings<span>.</span></h1><p>Manage the customer-facing packages, MMK prices, and payment accounts. Server secrets remain in Vercel environment variables.</p><Link href="/" className="back-link">← Back to shop</Link></section>
 
     {error && <p className="feedback error" role="alert">{error}</p>}
     {notice && <p className="feedback success" role="status">{notice}</p>}
