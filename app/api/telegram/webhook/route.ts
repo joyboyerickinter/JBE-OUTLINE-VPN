@@ -24,7 +24,7 @@ export async function POST(request: Request) {
   if (!callback?.data) return NextResponse.json({ ok: true });
 
   const adminChatId = process.env.TELEGRAM_ADMIN_CHAT_ID;
-  if (!adminChatId || String(callback.message?.chat?.id ?? "") !== adminChatId) {
+  if (!adminChatId || String(callback.message?.chat?.id ?? "") !== adminChatId || String(callback.from?.id ?? "") !== adminChatId) {
     await telegramApi("answerCallbackQuery", { callback_query_id: callback.id, text: "Not authorized.", show_alert: true });
     return NextResponse.json({ ok: true });
   }
