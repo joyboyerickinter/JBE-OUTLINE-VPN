@@ -102,7 +102,7 @@ export async function POST(request: Request) {
         status: "active", expires_at: expiresAt,
       });
       if (keyError) {
-        try { await revokeOutlineKey(available.env_slot, key.id); } catch {}
+        try { await revokeOutlineKey(available.env_slot, String(key.id)); } catch {}
         throw keyError;
       }
       accessUrl = key.accessUrl;
