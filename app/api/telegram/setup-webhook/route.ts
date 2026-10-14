@@ -21,7 +21,10 @@ export async function POST(request: Request) {
       allowed_updates: ["callback_query"],
       drop_pending_updates: false,
     });
-    return NextResponse.json({ ok: true, result });
+    await telegramApi("setChatMenuButton", {
+      menu_button: { type: "web_app", text: "Open VPN Shop", web_app: { url: appUrl } },
+    });
+    return NextResponse.json({ ok: true, result, miniAppMenuConfigured: true });
   } catch {
     return NextResponse.json({ error: "Telegram webhook registration failed. Check the bot token and APP_URL." }, { status: 502 });
   }
