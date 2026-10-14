@@ -59,7 +59,7 @@ async function outlineRequest(
 ): Promise<OutlineResponse> {
   const baseUrl = serverApiUrl(slot);
   const expectedPin = expectedCertificateFingerprint(slot);
-  const url = new URL(path, `${baseUrl}/`);
+  const url = new URL(`${baseUrl}${path}`);
 
   return new Promise((resolve, reject) => {
     let pinChecked = false;
