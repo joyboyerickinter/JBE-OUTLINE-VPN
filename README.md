@@ -33,6 +33,7 @@ Set these in Project Settings → Environment Variables. Keep all server secrets
 - `CRON_SECRET`: random secret protecting the expiry endpoint
 - `APP_URL`: the HTTPS production URL for this Vercel project
 - `OUTLINE_SERVER_1_API_URL`, `OUTLINE_SERVER_2_API_URL`, `OUTLINE_SERVER_3_API_URL`: management API URLs copied from Outline Manager. These are highly sensitive.
+- `OUTLINE_SERVER_1_CERT_SHA256`, `OUTLINE_SERVER_2_CERT_SHA256`, `OUTLINE_SERVER_3_CERT_SHA256`: the matching server's `certSha256` value from `/opt/outline/persisted-state/shadowbox_server_config.json`. Configure the fingerprint for each server separately. The app pins the exact TLS certificate before sending management API requests; do not disable TLS validation globally.
 
 After setting variables and redeploying, register the bot webhook once by making a POST request to `/api/telegram/setup-webhook` with header `Authorization: Bearer <TELEGRAM_WEBHOOK_SETUP_SECRET>`. Configure the bot's Mini App URL to the production URL. The expiry endpoint is `/api/cron/expire-keys`; call it daily with header `Authorization: Bearer <CRON_SECRET>`.
 
@@ -52,7 +53,7 @@ The database intentionally is not seeded with made-up prices or payment account 
 4. `npm run dev`
 
 ## Readiness and launch checklist
-1. Configure the Vercel environment variables listed above. Never paste secret values into chat or commit them.
+1. Configure the Vercel environment variables listed above, including each server's matching `certSha256` TLS pin. On each Outline Lightsail instance, inspect `/opt/outline/persisted-state/shadowbox_server_config.json` over SSH and copy only the `certSha256` value into the matching Vercel variable; never share or paste the `apiUrl`/secret path into chat. Never commit secret values.
 2. Deploy, then open `https://<your-production-domain>/api/health`. It reports missing variable names and whether Supabase can read the packages table; it never returns secret values. A 503 response means setup is incomplete.
 3. Add package prices and KBZPay/AYA Pay account details through the Telegram admin Mini App at `/admin` after the bot token and admin ID are configured.
 4. Register the webhook by sending a POST request to `/api/telegram/setup-webhook` with `Authorization: Bearer <TELEGRAM_WEBHOOK_SETUP_SECRET>`.
