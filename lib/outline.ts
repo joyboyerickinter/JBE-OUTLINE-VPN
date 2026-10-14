@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import https from "node:https";
+import type { TLSSocket } from "node:tls";
 import type { IncomingHttpHeaders } from "node:http";
 
 export type OutlineKey = { id: string | number; accessUrl: string };
@@ -95,8 +96,9 @@ async function outlineRequest(
     );
 
     request.on("socket", (socket) => {
-      socket.once("secureConnect", () => {
-        const certificate = socket.getPeerCertificate();
+      const tlsSocket = socket as TLSSocket;
+      tlsSocket.once("secureConnect", () => {
+        const certificate = tlsSocket.getPeerCertificate();
         if (!certificate.raw) {
           request.destroy(new Error(`Outline server ${slot} did not present a TLS certificate.`));
           return;
