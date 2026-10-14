@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readInitData, telegramApi, validateTelegramInitData } from "@/lib/telegram";
+import { readInitData, validateTelegramInitData } from "@/lib/telegram";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
