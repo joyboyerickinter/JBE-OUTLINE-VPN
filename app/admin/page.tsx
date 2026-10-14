@@ -3,7 +3,9 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 declare global {
-  interface Window { Telegram?: { WebApp?: { initData: string; ready: () => void; expand: () => void } } }
+  interface Window {
+    Telegram?: { WebApp?: { initData: string; ready: () => void; expand: () => void; colorScheme?: string } };
+  }
 }
 type PackageItem = { id: string; name: string; description: string; duration_days: number; price_mmk: number; active: boolean; sort_order: number };
 type PaymentItem = { id: string; provider: "KBZPay" | "AYAPay"; account_name: string; account_number: string; instructions: string; active: boolean; sort_order: number };
