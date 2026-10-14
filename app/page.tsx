@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 
 declare global {
   interface Window {
@@ -112,7 +113,7 @@ export default function Home() {
   return (
     <main className="page-shell">
       <header className="topbar">
-        <a className="brand" href="/" aria-label="JBE Outline VPN home">
+        <Link className="brand" href="/" aria-label="JBE Outline VPN home">
           <span className="brand-mark">J</span><span>JBE <b>OUTLINE</b></span>
         </a>
         <span className="status-pill"><i /> VPN ACCESS</span>
@@ -193,7 +194,7 @@ export default function Home() {
         <article className="feature-card"><span className="feature-number">02</span><span className="feature-icon">↗</span><h2>Simple setup</h2><p>Connect using the official Outline app.</p></article>
         <article className="feature-card"><span className="feature-number">03</span><span className="feature-icon">✓</span><h2>Human verified</h2><p>Payment is checked before a key is issued.</p></article>
       </section>
-      <footer className="footer"><span>© {new Date().getFullYear()} JBE Outline VPN</span><span>Powered by Outline · <a className="footer-admin" href="/admin">Admin settings ↗</a></span></footer>
+      <footer className="footer"><span>© {new Date().getFullYear()} JBE Outline VPN</span><span>Powered by Outline · <Link className="footer-admin" href="/admin">Admin settings ↗</Link></span></footer>
     </main>
   );
 }
