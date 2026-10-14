@@ -193,7 +193,7 @@ export default function Home() {
         <article className="feature-card"><span className="feature-number">02</span><span className="feature-icon">↗</span><h2>Simple setup</h2><p>Connect using the official Outline app.</p></article>
         <article className="feature-card"><span className="feature-number">03</span><span className="feature-icon">✓</span><h2>Human verified</h2><p>Payment is checked before a key is issued.</p></article>
       </section>
-      <footer className="footer"><span>© {new Date().getFullYear()} JBE Outline VPN</span><span>Powered by Outline</span></footer>
+      <footer className="footer"><span>© {new Date().getFullYear()} JBE Outline VPN</span><span>Powered by Outline · <a className="footer-admin" href="/admin">Admin settings ↗</a></span></footer>
     </main>
   );
 }
