@@ -17,6 +17,8 @@ Dedicated Telegram Mini App for buying Outline VPN access keys.
 - Telegram admin payment review buttons
 - Server-side Outline key creation after admin approval
 - Protected endpoint and daily cron route for revoking expired keys
+- Non-secret readiness endpoint at `/api/health` to check required environment variables and Supabase connectivity
+- Device-limit feature intentionally excluded from the current MVP
 
 ## Required Vercel configuration
 Set these in Project Settings → Environment Variables. Keep all server secrets unprefixed by `NEXT_PUBLIC_`.
@@ -49,5 +51,13 @@ The database intentionally is not seeded with made-up prices or payment account 
 3. Copy `.env.example` to `.env.local` and fill in values.
 4. `npm run dev`
 
-## Before launch
-Configure Vercel environment variables, the three package prices, KBZPay/AYA Pay account details, Telegram webhook + Mini App URL, and Outline management URLs. Test a full purchase and expiration/revocation before sharing the bot publicly.
+## Readiness and launch checklist
+1. Configure the Vercel environment variables listed above. Never paste secret values into chat or commit them.
+2. Deploy, then open `https://<your-production-domain>/api/health`. It reports missing variable names and whether Supabase can read the packages table; it never returns secret values. A 503 response means setup is incomplete.
+3. Add package prices and KBZPay/AYA Pay account details through the Telegram admin Mini App at `/admin` after the bot token and admin ID are configured.
+4. Register the webhook by sending a POST request to `/api/telegram/setup-webhook` with `Authorization: Bearer <TELEGRAM_WEBHOOK_SETUP_SECRET>`.
+5. Verify the Mini App URL with BotFather and open the Mini App from the dedicated Telegram bot.
+6. Test package selection, both payment methods, screenshot upload, admin approval/rejection, key delivery, order history, and expiry/revocation on a test order before launch.
+7. Confirm the Vercel cron schedule is active. The cron endpoint is `/api/cron/expire-keys` and requires `Authorization: Bearer <CRON_SECRET>`.
+
+Device registration limits are deliberately not part of this MVP. The standard Outline Server API cannot reliably identify distinct physical devices sharing an access key.
