@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   const orderId = match[2];
   const db = supabaseAdmin();
   const { data: order, error: orderError } = await db.from("outline_vpn_orders")
-    .select("id,telegram_user_id,telegram_first_name,package_name_snapshot,duration_days_snapshot,price_mmk,status")
+    .select("id,telegram_user_id,telegram_first_name,package_name_snapshot,duration_days_snapshot,price_mmk,status,server_id,server_name_snapshot,server_region_snapshot")
     .eq("id", orderId).maybeSingle();
   if (orderError || !order) {
     await telegramApi("answerCallbackQuery", { callback_query_id: callback.id, text: "Order not found.", show_alert: true });
@@ -89,11 +89,13 @@ export async function POST(request: Request) {
     let accessUrl = existingKey?.access_url;
     let expiresAt = existingKey?.expires_at;
     if (!existingKey) {
-      const { data: servers, error: serversError } = await db.from("outline_vpn_servers")
-        .select("id,env_slot").eq("active", true).order("sort_order", { ascending: true });
-      if (serversError) throw serversError;
-      const available = (servers ?? []).find((server) => Boolean(process.env[`OUTLINE_SERVER_${server.env_slot}_API_URL`]));
-      if (!available) throw new Error("No active Outline server is configured.");
+      const { data: available, error: serverError } = await db.from("outline_vpn_servers")
+        .select("id,name,region,env_slot,stock_limit,active").eq("id", order.server_id ?? "").eq("active", true).maybeSingle();
+      if (serverError) throw serverError;
+      if (!available || !process.env[`OUTLINE_SERVER_${available.env_slot}_API_URL`]) throw new Error("The server selected for this order is unavailable or not configured.");
+      const { count: activeKeys, error: stockError } = await db.from("outline_vpn_keys").select("id", { count: "exact", head: true }).eq("server_id", available.id).eq("status", "active").gt("expires_at", new Date().toISOString());
+      if (stockError) throw stockError;
+      if ((activeKeys ?? 0) >= available.stock_limit) throw new Error("The selected server is out of stock. Increase its stock limit or ask the customer to choose another server.");
 
       const key = await createOutlineKey(available.env_slot, `JBE-${order.telegram_user_id}-${orderId.slice(0, 8)}`);
       expiresAt = new Date(Date.now() + Number(order.duration_days_snapshot) * 86_400_000).toISOString();
