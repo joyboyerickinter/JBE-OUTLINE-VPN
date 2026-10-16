@@ -9,7 +9,7 @@ declare global {
   }
 }
 
-type PackageItem = { id: string; name: string; description: string; duration_days: number; price_mmk: number };
+type PackageItem = { id: string; name: string; description: string; duration_days: number; price_mmk: number; data_limit_gb: number | null };
 type ServerItem = { id: string; name: string; region: string; stock: number; available: boolean };
 type Payment = { provider: "KBZPay" | "AYAPay"; account_name: string; account_number: string; instructions: string };
 type Order = {
@@ -59,7 +59,6 @@ export default function Home() {
     setInitData(rawInitData);
     window.Telegram?.WebApp?.ready();
     window.Telegram?.WebApp?.expand();
-    fetch("/api/servers", { cache: "no-store" }).then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.error ?? "Servers could not be loaded."); setServers(data.servers ?? []); }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Servers could not be loaded."));
     fetch("/api/packages", { cache: "no-store" })
       .then(async (response) => {
         const data = await response.json();
@@ -141,27 +140,27 @@ export default function Home() {
 
       {!initData && <div className="notice">For secure ordering, open this page from the JBE Outline VPN Telegram Mini App. Browsing packages is available here, but orders require Telegram.</div>}
 
-      <section className="packages-panel">
-        <div className="section-heading"><div><p className="eyebrow">01 / SERVER</p><h2>Choose your server</h2><p className="panel-note">Select a region and check the remaining stock before ordering.</p></div><span className="step-tag">STEP 1</span></div>
-        {servers.length === 0 ? <p className="panel-note">Server options are temporarily unavailable. Please refresh in a moment.</p> : <div className="package-grid">{servers.map((server) => <button type="button" key={server.id} disabled={!server.available} className={selectedServer?.id === server.id ? "package-card selected" : "package-card"} onClick={() => { setSelectedServer(server); setOrder(null); setPayment(null); setError(""); setMessage(""); }}><span className="package-mark">⌁</span><strong>{server.name}</strong><span className="package-description">Region: {server.region}</span><span className="package-duration">{server.stock} available</span><span className="package-select">{!server.available ? "OUT OF STOCK" : selectedServer?.id === server.id ? "SELECTED ✓" : "SELECT SERVER ↗"}</span></button>)}</div>}
-      </section>
-
       <section id="packages" className="packages-panel">
         <div className="section-heading">
-          <div><p className="eyebrow">02 / PACKAGES</p><h2>Choose your connection</h2><p className="panel-note">Select the plan that fits your needs.</p></div>
+          <div><p className="eyebrow">01 / PACKAGES</p><h2>Choose your connection</h2><p className="panel-note">Select the plan that fits your needs.</p></div>
           <span className="step-tag">STEP 1</span>
         </div>
         {loading ? <p className="panel-note">Loading available packages…</p> : packages.length === 0 ? (
           <div className="empty-state"><span className="placeholder-icon">＋</span><div><b>Packages are being configured</b><p>Available plans will appear here once the admin adds package prices.</p></div></div>
         ) : (
           <div className="package-grid">
-            {packages.map((item) => <button type="button" className={selectedPackage?.id === item.id ? "package-card selected" : "package-card"} key={item.id} onClick={() => { setSelectedPackage(item); setOrder(null); setPayment(null); setError(""); setMessage(""); }}>
+            {packages.map((item) => <button type="button" className={selectedPackage?.id === item.id ? "package-card selected" : "package-card"} key={item.id} onClick={async () => { setSelectedPackage(item); setSelectedServer(null); setServers([]); setOrder(null); setPayment(null); setError(""); setMessage(""); try { const response = await fetch(`/api/package-servers?packageId=${encodeURIComponent(item.id)}`, { cache: "no-store" }); const data = await response.json(); if (!response.ok) throw new Error(data.error ?? "Servers could not be loaded."); setServers(data.servers ?? []); } catch (reason) { setError(reason instanceof Error ? reason.message : "Servers could not be loaded."); } }}>
               <span className="package-mark">◈</span><strong>{item.name}</strong><span className="package-description">{item.description || "Private Outline VPN access"}</span>
-              <span className="package-duration">{item.duration_days} days</span><span className="package-price">{money(item.price_mmk)}</span>
+              <span className="package-duration">{item.duration_days} days · {item.data_limit_gb == null ? "Unlimited data" : `${item.data_limit_gb} GB data`}</span><span className="package-price">{money(item.price_mmk)}</span>
               <span className="package-select">{selectedPackage?.id === item.id ? "SELECTED ✓" : "SELECT PLAN ↗"}</span>
             </button>)}
           </div>
         )}
+      </section>
+
+      <section className="packages-panel">
+        <div className="section-heading"><div><p className="eyebrow">02 / SERVER</p><h2>Choose your server</h2><p className="panel-note">{selectedPackage ? "Stock shown is specific to the package you selected." : "Choose a package first to see available servers."}</p></div><span className="step-tag">STEP 2</span></div>
+        {!selectedPackage ? <p className="panel-note">Choose a package above to load server availability.</p> : servers.length === 0 ? <p className="panel-note">No stock is configured for this package yet.</p> : <div className="package-grid">{servers.map((server) => <button type="button" key={server.id} disabled={!server.available} className={selectedServer?.id === server.id ? "package-card selected" : "package-card"} onClick={() => { setSelectedServer(server); setOrder(null); setPayment(null); setError(""); setMessage(""); }}><span className="package-mark">⌁</span><strong>{server.name}</strong><span className="package-description">Region: {server.region}</span><span className="package-duration">{server.stock} available</span><span className="package-select">{!server.available ? "OUT OF STOCK" : selectedServer?.id === server.id ? "SELECTED ✓" : "SELECT SERVER ↗"}</span></button>)}</div>}
       </section>
 
       <section className="checkout-panel">
