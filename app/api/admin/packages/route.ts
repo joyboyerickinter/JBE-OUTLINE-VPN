@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     requireTelegramAdmin(request);
     const db = supabaseAdmin();
     const [{ data: packages, error: packagesError }, { data: payments, error: paymentsError }] = await Promise.all([
-      db.from("outline_vpn_packages").select("id,name,description,duration_days,price_mmk,active,sort_order,created_at").order("sort_order", { ascending: true }),
+      db.from("outline_vpn_packages").select("id,name,description,duration_days,price_mmk,data_limit_gb,active,sort_order,created_at").order("sort_order", { ascending: true }),
       db.from("outline_vpn_payment_settings").select("id,provider,account_name,account_number,instructions,active,sort_order,updated_at").order("sort_order", { ascending: true }),
     ]);
     if (packagesError || paymentsError) throw new Error("Could not load admin settings.");
@@ -31,21 +31,21 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     requireTelegramAdmin(request);
-    const body = await request.json() as { id?: string; name?: string; description?: string; duration_days?: number; price_mmk?: number; active?: boolean; sort_order?: number };
+    const body = await request.json() as { id?: string; name?: string; description?: string; duration_days?: number; price_mmk?: number; data_limit_gb?: number | null; active?: boolean; sort_order?: number };
     const name = String(body.name ?? "").trim();
     const duration = Number(body.duration_days);
-    const price = Number(body.price_mmk);
-    if (!name || name.length > 80 || !Number.isInteger(duration) || duration < 1 || duration > 3650 || !Number.isInteger(price) || price < 0 || price > 100000000) {
+    const price = Number(body.price_mmk);\n    const dataLimit = body.data_limit_gb == null || body.data_limit_gb === 0 ? null : Number(body.data_limit_gb);
+    if (!name || name.length > 80 || !Number.isInteger(duration) || duration < 1 || duration > 3650 || !Number.isInteger(price) || price < 0 || price > 100000000 || (dataLimit !== null && (!Number.isInteger(dataLimit) || dataLimit < 1 || dataLimit > 1000000))) {
       return NextResponse.json({ error: "Enter a package name, valid duration, and whole-number MMK price." }, { status: 400 });
     }
     const values = {
       name, description: String(body.description ?? "").trim().slice(0, 240), duration_days: duration,
-      price_mmk: price, active: body.active !== false, sort_order: Number.isInteger(body.sort_order) ? Number(body.sort_order) : 0,
+      price_mmk: price, data_limit_gb: dataLimit, active: body.active !== false, sort_order: Number.isInteger(body.sort_order) ? Number(body.sort_order) : 0,
       updated_at: new Date().toISOString(),
     };
     const db = supabaseAdmin();
     const result = body.id
-      ? await db.from("outline_vpn_packages").update(values).eq("id", body.id).select("id,name,description,duration_days,price_mmk,active,sort_order").single()
+      ? await db.from("outline_vpn_packages").update(values).eq("id", body.id).select("id,name,description,duration_days,price_mmk,data_limit_gb,active,sort_order").single()
       : await db.from("outline_vpn_packages").insert(values).select("id,name,description,duration_days,price_mmk,active,sort_order").single();
     if (result.error) throw result.error;
     return NextResponse.json({ package: result.data });
