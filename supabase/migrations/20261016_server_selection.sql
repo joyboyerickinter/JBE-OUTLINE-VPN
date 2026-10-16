@@ -4,7 +4,9 @@ alter table public.outline_vpn_servers
   add column if not exists stock_limit integer not null default 100 check (stock_limit >= 0);
 
 alter table public.outline_vpn_orders
-  add column if not exists server_id uuid references public.outline_vpn_servers(id) on delete restrict;
+  add column if not exists server_id uuid references public.outline_vpn_servers(id) on delete restrict,
+  add column if not exists server_name_snapshot text,
+  add column if not exists server_region_snapshot text;
 
 update public.outline_vpn_servers
 set region = case env_slot
