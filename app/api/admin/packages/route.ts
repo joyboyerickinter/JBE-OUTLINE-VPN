@@ -34,7 +34,8 @@ export async function POST(request: Request) {
     const body = await request.json() as { id?: string; name?: string; description?: string; duration_days?: number; price_mmk?: number; data_limit_gb?: number | null; active?: boolean; sort_order?: number };
     const name = String(body.name ?? "").trim();
     const duration = Number(body.duration_days);
-    const price = Number(body.price_mmk);\n    const dataLimit = body.data_limit_gb == null || body.data_limit_gb === 0 ? null : Number(body.data_limit_gb);
+    const price = Number(body.price_mmk);
+    const dataLimit = body.data_limit_gb == null || body.data_limit_gb === 0 ? null : Number(body.data_limit_gb);
     if (!name || name.length > 80 || !Number.isInteger(duration) || duration < 1 || duration > 3650 || !Number.isInteger(price) || price < 0 || price > 100000000 || (dataLimit !== null && (!Number.isInteger(dataLimit) || dataLimit < 1 || dataLimit > 1000000))) {
       return NextResponse.json({ error: "Enter a package name, valid duration, and whole-number MMK price." }, { status: 400 });
     }
