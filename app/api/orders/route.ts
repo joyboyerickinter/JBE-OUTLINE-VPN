@@ -28,7 +28,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const user = validateTelegramInitData(readInitData(request));
-    const body = await request.json() as { packageId?: string; paymentProvider?: "KBZPay" | "AYAPay" };
+    const body = await request.json() as { packageId?: string; paymentProvider?: "KBZPay" | "AYAPay"; serverId?: string };
     if (!body.packageId || !body.serverId || !["KBZPay", "AYAPay"].includes(String(body.paymentProvider))) {
       return NextResponse.json({ error: "Choose a package and payment method." }, { status: 400 });
     }
