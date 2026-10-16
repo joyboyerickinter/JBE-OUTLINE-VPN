@@ -10,6 +10,7 @@ declare global {
 }
 type PackageItem = { id: string; name: string; description: string; duration_days: number; price_mmk: number; active: boolean; sort_order: number };
 type PaymentItem = { id: string; provider: "KBZPay" | "AYAPay"; account_name: string; account_number: string; instructions: string; active: boolean; sort_order: number };
+type ServerItem = { id: string; name: string; region: string; env_slot: number; stock_limit: number; active: boolean; sort_order: number; active_keys: number; available_stock: number };
 const emptyPackage = { name: "", description: "", duration_days: "30", price_mmk: "", active: true, sort_order: "0" };
 const emptyPayment = { provider: "KBZPay" as "KBZPay" | "AYAPay", account_name: "", account_number: "", instructions: "", active: true, sort_order: "0" };
 const money = (amount: number) => new Intl.NumberFormat("en-US").format(amount) + " Ks";
@@ -18,6 +19,8 @@ export default function AdminPage() {
   const [initData, setInitData] = useState("");
   const [packages, setPackages] = useState<PackageItem[]>([]);
   const [payments, setPayments] = useState<PaymentItem[]>([]);
+  const [servers, setServers] = useState<ServerItem[]>([]);
+  const [serverForms, setServerForms] = useState<Record<string, { name: string; region: string; stock_limit: string; active: boolean; sort_order: string }>>({});
   const [packageForm, setPackageForm] = useState(emptyPackage);
   const [paymentForm, setPaymentForm] = useState(emptyPayment);
   const [editingPackage, setEditingPackage] = useState<string | null>(null);
@@ -108,7 +111,7 @@ export default function AdminPage() {
       </section>
 
       <section className="admin-panel">
-        <div className="section-heading"><div><p className="eyebrow">02 / PAYMENT METHODS</p><h2>KBZPay & AYA Pay</h2><p className="panel-note">These account details are shown to customers after they create an order.</p></div></div>
+        <div className="section-heading"><div><p className="eyebrow">03 / PAYMENT METHODS</p><h2>KBZPay & AYA Pay</h2><p className="panel-note">These account details are shown to customers after they create an order.</p></div></div>
         <div className="admin-items">{payments.map((item) => <article className={item.active ? "admin-item" : "admin-item inactive"} key={item.id}><div><b>{item.provider} · {item.account_name}</b><p>{item.account_number} · {item.active ? "Active" : "Inactive"}</p>{item.instructions && <small>{item.instructions}</small>}</div><div className="admin-item-actions"><button className="small-button" onClick={() => { setEditingPayment(item.id); setPaymentForm({ provider: item.provider, account_name: item.account_name, account_number: item.account_number, instructions: item.instructions, active: item.active, sort_order: String(item.sort_order) }); }}>Edit</button>{item.active && <button className="small-button danger-button" disabled={busy} onClick={() => void deactivate("payments", item.id)}>Deactivate</button>}</div></article>)}</div>
         <form className="admin-form" onSubmit={savePayment}>
           <h3>{editingPayment ? "Edit payment account" : "Add a payment account"}</h3>
