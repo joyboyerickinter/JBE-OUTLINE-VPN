@@ -10,6 +10,7 @@ declare global {
 }
 
 type PackageItem = { id: string; name: string; description: string; duration_days: number; price_mmk: number };
+type ServerItem = { id: string; name: string; region: string; stock: number; available: boolean };
 type Payment = { provider: "KBZPay" | "AYAPay"; account_name: string; account_number: string; instructions: string };
 type Order = {
   id: string; package_name_snapshot: string; duration_days_snapshot: number; price_mmk: number;
@@ -30,6 +31,8 @@ const statusLabel: Record<string, string> = {
 
 export default function Home() {
   const [packages, setPackages] = useState<PackageItem[]>([]);
+  const [servers, setServers] = useState<ServerItem[]>([]);
+  const [selectedServer, setSelectedServer] = useState<ServerItem | null>(null);
   const [selectedPackage, setSelectedPackage] = useState<PackageItem | null>(null);
   const [paymentProvider, setPaymentProvider] = useState<"KBZPay" | "AYAPay">("KBZPay");
   const [order, setOrder] = useState<{ id: string; package_name_snapshot: string; duration_days_snapshot: number; price_mmk: number; status: string } | null>(null);
@@ -56,6 +59,7 @@ export default function Home() {
     setInitData(rawInitData);
     window.Telegram?.WebApp?.ready();
     window.Telegram?.WebApp?.expand();
+    fetch("/api/servers", { cache: "no-store" }).then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.error ?? "Servers could not be loaded."); setServers(data.servers ?? []); }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Servers could not be loaded."));
     fetch("/api/packages", { cache: "no-store" })
       .then(async (response) => {
         const data = await response.json();
@@ -68,13 +72,13 @@ export default function Home() {
   }, [loadOrders]);
 
   async function createOrder() {
-    if (!selectedPackage) return;
+    if (!selectedPackage || !selectedServer) return;
     setBusy(true); setError(""); setMessage("");
     try {
       const response = await fetch("/api/orders", {
         method: "POST",
         headers: { "content-type": "application/json", "x-telegram-init-data": initData },
-        body: JSON.stringify({ packageId: selectedPackage.id, paymentProvider }),
+        body: JSON.stringify({ packageId: selectedPackage.id, paymentProvider, serverId: selectedServer.id }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not create order.");
@@ -137,9 +141,14 @@ export default function Home() {
 
       {!initData && <div className="notice">For secure ordering, open this page from the JBE Outline VPN Telegram Mini App. Browsing packages is available here, but orders require Telegram.</div>}
 
+      <section className="packages-panel">
+        <div className="section-heading"><div><p className="eyebrow">01 / SERVER</p><h2>Choose your server</h2><p className="panel-note">Select a region and check the remaining stock before ordering.</p></div><span className="step-tag">STEP 1</span></div>
+        {servers.length === 0 ? <p className="panel-note">Server options are temporarily unavailable. Please refresh in a moment.</p> : <div className="package-grid">{servers.map((server) => <button type="button" key={server.id} disabled={!server.available} className={selectedServer?.id === server.id ? "package-card selected" : "package-card"} onClick={() => { setSelectedServer(server); setOrder(null); setPayment(null); setError(""); setMessage(""); }}><span className="package-mark">⌁</span><strong>{server.name}</strong><span className="package-description">Region: {server.region}</span><span className="package-duration">{server.stock} available</span><span className="package-select">{!server.available ? "OUT OF STOCK" : selectedServer?.id === server.id ? "SELECTED ✓" : "SELECT SERVER ↗"}</span></button>)}</div>}
+      </section>
+
       <section id="packages" className="packages-panel">
         <div className="section-heading">
-          <div><p className="eyebrow">01 / PACKAGES</p><h2>Choose your connection</h2><p className="panel-note">Select the plan that fits your needs.</p></div>
+          <div><p className="eyebrow">02 / PACKAGES</p><h2>Choose your connection</h2><p className="panel-note">Select the plan that fits your needs.</p></div>
           <span className="step-tag">STEP 1</span>
         </div>
         {loading ? <p className="panel-note">Loading available packages…</p> : packages.length === 0 ? (
@@ -157,15 +166,15 @@ export default function Home() {
 
       <section className="checkout-panel">
         <div className="section-heading">
-          <div><p className="eyebrow">02 / CHECKOUT</p><h2>Payment details</h2><p className="panel-note">Choose a payment method to create your order.</p></div>
+          <div><p className="eyebrow">03 / CHECKOUT</p><h2>Payment details</h2><p className="panel-note">Choose a payment method to create your order.</p></div>
           <span className="step-tag">STEP 2</span>
         </div>
         <div className="payment-options">
           <button type="button" className={paymentProvider === "KBZPay" ? "payment-option selected" : "payment-option"} onClick={() => { setPaymentProvider("KBZPay"); setOrder(null); setPayment(null); }}>KBZPay <span>Mobile wallet</span></button>
           <button type="button" className={paymentProvider === "AYAPay" ? "payment-option selected" : "payment-option"} onClick={() => { setPaymentProvider("AYAPay"); setOrder(null); setPayment(null); }}>AYA Pay <span>Mobile wallet</span></button>
         </div>
-        {selectedPackage && !order && <div className="order-summary"><div><span>Selected package</span><b>{selectedPackage.name} · {selectedPackage.duration_days} days</b></div><strong>{money(selectedPackage.price_mmk)}</strong></div>}
-        {!order && <button className="primary-button wide-button" disabled={!selectedPackage || !initData || busy} onClick={createOrder}>{busy ? "Creating order…" : "Create order & show payment details"} <span>↗</span></button>}
+        {selectedPackage && !order && <div className="order-summary"><div><span>Selected server</span><b>{selectedServer ? selectedServer.name + " · " + selectedServer.region + " · " + selectedServer.stock + " available" : "Choose a server above"}</b><span>Selected package</span><b>{selectedPackage.name} · {selectedPackage.duration_days} days</b></div><strong>{money(selectedPackage.price_mmk)}</strong></div>}
+        {!order && <button className="primary-button wide-button" disabled={!selectedPackage || !selectedServer || !selectedServer.available || !initData || busy} onClick={createOrder}>{busy ? "Creating order…" : "Create order & show payment details"} <span>↗</span></button>}
         {order && payment && <div className="payment-details">
           <div className="order-created"><span className="success-mark">✓</span><div><b>Order created</b><p>Reference: <code>{order.id}</code></p></div></div>
           <div className="bank-card"><span className="bank-label">{payment.provider}</span><span className="bank-name">{payment.account_name}</span><div className="account-number">{payment.account_number}</div><button type="button" className="copy-button" onClick={() => { void navigator.clipboard?.writeText(payment.account_number); setMessage("Payment account number copied."); }}>Copy account number</button>{payment.instructions && <p>{payment.instructions}</p>}<div className="amount-line"><span>Transfer amount</span><b>{money(order.price_mmk)}</b></div></div>
