@@ -8,7 +8,7 @@ export async function GET() {
   try {
     const { data, error } = await supabaseAdmin()
       .from("outline_vpn_packages")
-      .select("id,name,description,duration_days,price_mmk")
+      .select("id,name,description,duration_days,price_mmk,data_limit_gb")
       .eq("active", true)
       .order("sort_order", { ascending: true });
     if (error) throw error;
