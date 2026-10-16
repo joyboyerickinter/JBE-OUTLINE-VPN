@@ -33,26 +33,16 @@ function expectedCertificateFingerprint(slot: number) {
   const key = `OUTLINE_SERVER_${slot}_CERT_SHA256`;
   const value = process.env[key]?.trim();
   if (!value) {
-    throw new Error(
-      `Outline server ${slot} certificate pin is missing (${key}).`,
-    );
+    throw new Error(`Outline server ${slot} certificate pin is missing (${key}).`);
   }
-
   const normalized = value.replace(/[^a-fA-F0-9]/g, "").toLowerCase();
   if (normalized.length !== 64) {
-    throw new Error(
-      `${key} must contain a SHA-256 certificate fingerprint (64 hex characters).`,
-    );
+    throw new Error(`${key} must contain a SHA-256 certificate fingerprint (64 hex characters).`);
   }
   return normalized;
 }
 
-/**
- * Outline's management API commonly uses a self-signed TLS certificate.
- * We do not turn off TLS checks globally: before sending any HTTP request,
- * this function compares the server's leaf certificate against a SHA-256 pin
- * obtained from the trusted Outline server configuration.
- */
+/** Pin the leaf certificate before sending any HTTP request bytes. */
 async function outlineRequest(
   slot: number,
   path: string,
@@ -61,23 +51,26 @@ async function outlineRequest(
   const baseUrl = serverApiUrl(slot);
   const expectedPin = expectedCertificateFingerprint(slot);
   const url = new URL(`${baseUrl}${path}`);
+  const stage = `${options.method} ${path.split("?")[0]}`;
 
   return new Promise((resolve, reject) => {
     let pinChecked = false;
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
     const body = options.body === undefined ? undefined : JSON.stringify(options.body);
     const request = https.request(
       url,
       {
         method: options.method,
-        // The API's self-signed cert is not in the public CA store. We manually
-        // authenticate the exact certificate before allowing request bytes out.
         rejectUnauthorized: false,
-        headers: body === undefined
-          ? undefined
-          : {
-              "content-type": "application/json",
-              "content-length": Buffer.byteLength(body),
-            },
+        headers: body === undefined ? undefined : {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(body),
+        },
       },
       (response) => {
         const chunks: Buffer[] = [];
@@ -85,13 +78,17 @@ async function outlineRequest(
           chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
         });
         response.on("end", () => {
+          if (settled) return;
+          settled = true;
           resolve({
             status: response.statusCode ?? 0,
             headers: response.headers,
             body: Buffer.concat(chunks).toString("utf8"),
           });
         });
-        response.on("error", reject);
+        response.on("error", (error) => fail(new Error(
+          `Outline server ${slot} ${stage} response error: ${error.message}`,
+        )));
       },
     );
 
@@ -103,17 +100,13 @@ async function outlineRequest(
           request.destroy(new Error(`Outline server ${slot} did not present a TLS certificate.`));
           return;
         }
-
         const actualPin = createHash("sha256").update(certificate.raw).digest("hex");
         if (actualPin !== expectedPin) {
-          request.destroy(
-            new Error(
-              `Outline server ${slot} TLS certificate fingerprint did not match its configured pin.`,
-            ),
-          );
+          request.destroy(new Error(
+            `Outline server ${slot} TLS certificate fingerprint did not match its configured pin.`,
+          ));
           return;
         }
-
         pinChecked = true;
         if (body === undefined) request.end();
         else request.end(body);
@@ -121,13 +114,13 @@ async function outlineRequest(
     });
 
     request.setTimeout(15_000, () => {
-      request.destroy(new Error(`Outline server ${slot} API request timed out.`));
+      request.destroy(new Error(`Outline server ${slot} ${stage} timed out after 15 seconds.`));
     });
     request.on("error", (error) => {
-      if (!pinChecked && error.message.includes("certificate")) {
-        reject(new Error(`Outline server ${slot} TLS certificate verification failed.`));
+      if (!pinChecked && /certificate/i.test(error.message)) {
+        fail(new Error(`Outline server ${slot} TLS certificate verification failed during ${stage}.`));
       } else {
-        reject(error);
+        fail(new Error(`Outline server ${slot} ${stage} failed: ${error.message}`));
       }
     });
   });
@@ -149,14 +142,16 @@ export async function createOutlineKey(slot: number, label: string): Promise<Out
     throw new Error("Outline returned an invalid key response.");
   }
 
-  const rename = await outlineRequest(
-    slot,
-    `/access-keys/${encodeURIComponent(String(data.id))}/name`,
-    { method: "PUT", body: { name: label.slice(0, 64) } },
-  );
-  // The key itself remains usable if only the optional rename fails.
-  if (rename.status < 200 || rename.status >= 300) {
-    // Intentionally continue: preserve the key so the order can be fulfilled.
+  // Naming is optional: never mark a successfully-created key as failed just
+  // because the separate rename request is interrupted.
+  try {
+    await outlineRequest(
+      slot,
+      `/access-keys/${encodeURIComponent(String(data.id))}/name`,
+      { method: "PUT", body: { name: label.slice(0, 64) } },
+    );
+  } catch {
+    // Keep the valid key and continue to database persistence.
   }
 
   return { id: String(data.id), accessUrl: data.accessUrl };
@@ -170,9 +165,7 @@ export async function revokeOutlineKey(slot: number, keyId: string) {
   );
   if (response.status < 200 || response.status >= 300) {
     if (response.status !== 404) {
-      throw new Error(
-        `Outline server ${slot} could not revoke a key (HTTP ${response.status}).`,
-      );
+      throw new Error(`Outline server ${slot} could not revoke a key (HTTP ${response.status}).`);
     }
   }
 }
