@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createOutlineKey, revokeOutlineKey } from "@/lib/outline";
+import { createOutlineKey, revokeOutlineKey, setOutlineKeyDataLimit } from "@/lib/outline";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { telegramApi } from "@/lib/telegram";
 
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   const orderId = match[2];
   const db = supabaseAdmin();
   const { data: order, error: orderError } = await db.from("outline_vpn_orders")
-    .select("id,telegram_user_id,telegram_first_name,package_name_snapshot,duration_days_snapshot,price_mmk,status,server_id,server_name_snapshot,server_region_snapshot")
+    .select("id,telegram_user_id,telegram_first_name,package_id,package_name_snapshot,duration_days_snapshot,data_limit_gb_snapshot,price_mmk,status,server_id,server_name_snapshot,server_region_snapshot")
     .eq("id", orderId).maybeSingle();
   if (orderError || !order) {
     await telegramApi("answerCallbackQuery", { callback_query_id: callback.id, text: "Order not found.", show_alert: true });
@@ -93,11 +93,31 @@ export async function POST(request: Request) {
         .select("id,name,region,env_slot,stock_limit,active").eq("id", order.server_id ?? "").eq("active", true).maybeSingle();
       if (serverError) throw serverError;
       if (!available || !process.env[`OUTLINE_SERVER_${available.env_slot}_API_URL`]) throw new Error("The server selected for this order is unavailable or not configured.");
-      const { count: activeKeys, error: stockError } = await db.from("outline_vpn_keys").select("id", { count: "exact", head: true }).eq("server_id", available.id).eq("status", "active").gt("expires_at", new Date().toISOString());
-      if (stockError) throw stockError;
-      if ((activeKeys ?? 0) >= available.stock_limit) throw new Error("The selected server is out of stock. Increase its stock limit or ask the customer to choose another server.");
+      const { data: stockRow, error: stockRowError } = await db.from("outline_vpn_package_server_stock")
+        .select("stock_limit").eq("package_id", order.package_id).eq("server_id", available.id).maybeSingle();
+      if (stockRowError) throw stockRowError;
+      if (!stockRow || stockRow.stock_limit <= 0) throw new Error("This package has no stock configured on the selected server.");
+
+      const { data: activeKeys, error: activeKeysError } = await db.from("outline_vpn_keys")
+        .select("order_id").eq("server_id", available.id).eq("status", "active").gt("expires_at", new Date().toISOString());
+      if (activeKeysError) throw activeKeysError;
+      const activeOrderIds = [...new Set((activeKeys ?? []).map(row => row.order_id).filter(Boolean))];
+      let activeForPackage = 0;
+      if (activeOrderIds.length) {
+        const { data: activeOrders, error: activeOrdersError } = await db.from("outline_vpn_orders")
+          .select("id").in("id", activeOrderIds).eq("package_id", order.package_id).eq("server_id", available.id);
+        if (activeOrdersError) throw activeOrdersError;
+        activeForPackage = activeOrders?.length ?? 0;
+      }
+      if (activeForPackage >= stockRow.stock_limit) throw new Error("This package is out of stock on the selected server.");
 
       const key = await createOutlineKey(available.env_slot, `JBE-${order.telegram_user_id}-${orderId.slice(0, 8)}`);
+      try {
+        await setOutlineKeyDataLimit(available.env_slot, String(key.id), order.data_limit_gb_snapshot ?? null);
+      } catch (limitError) {
+        try { await revokeOutlineKey(available.env_slot, String(key.id)); } catch {}
+        throw limitError;
+      }
       expiresAt = new Date(Date.now() + Number(order.duration_days_snapshot) * 86_400_000).toISOString();
       const { error: keyError } = await db.from("outline_vpn_keys").insert({
         order_id: orderId, server_id: available.id, outline_key_id: key.id, access_url: key.accessUrl,
