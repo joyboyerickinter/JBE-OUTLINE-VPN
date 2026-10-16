@@ -19,3 +19,7 @@ revoke all on public.outline_vpn_package_server_stock from anon, authenticated;
 -- Backfill package data limit as Unlimited (NULL) so existing products remain usable.
 create index if not exists outline_vpn_package_server_stock_server_idx
   on public.outline_vpn_package_server_stock (server_id, package_id);
+
+alter table public.outline_vpn_orders
+  add column if not exists data_limit_gb_snapshot integer null
+  check (data_limit_gb_snapshot is null or data_limit_gb_snapshot > 0);
