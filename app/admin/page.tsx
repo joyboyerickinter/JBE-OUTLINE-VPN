@@ -39,6 +39,12 @@ export default function AdminPage() {
       if (!response.ok) throw new Error(data.error ?? "Admin access denied.");
       setPackages(data.packages ?? []);
       setPayments(data.payments ?? []);
+      const serverResponse = await fetch("/api/admin/servers", { headers: { "x-telegram-init-data": raw }, cache: "no-store" });
+      const serverData = await serverResponse.json();
+      if (!serverResponse.ok) throw new Error(serverData.error ?? "Could not load servers.");
+      const loadedServers: ServerItem[] = serverData.servers ?? [];
+      setServers(loadedServers);
+      setServerForms(Object.fromEntries(loadedServers.map((server) => [server.id, { name: server.name, region: server.region, stock_limit: String(server.stock_limit), active: server.active, sort_order: String(server.sort_order) }])));
       setError("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load admin settings."); }
     finally { setLoading(false); }
@@ -99,7 +105,19 @@ export default function AdminPage() {
     {notice && <p className="feedback success" role="status">{notice}</p>}
     {loading ? <p className="panel-note">Loading settings…</p> : <>
       <section className="admin-panel">
-        <div className="section-heading"><div><p className="eyebrow">01 / PRODUCT CATALOG</p><h2>VPN packages</h2><p className="panel-note">Add the three packages customers can buy.</p></div></div>
+        <div className="section-heading"><div><p className="eyebrow">01 / SERVER MANAGEMENT</p><h2>Outline servers</h2><p className="panel-note">Manage customer-facing regions, availability and stock. Remaining stock = stock limit minus active, unexpired keys.</p></div></div>
+        <div className="admin-items">{servers.map((server) => { const form = serverForms[server.id]; if (!form) return null; return <article className={form.active ? "admin-item" : "admin-item inactive"} key={server.id}>
+          <div><b>{form.name} · Slot {server.env_slot}</b><p>Region: {form.region} · {server.available_stock} remaining · {server.active_keys} active keys · {form.active ? "Visible" : "Hidden"}</p></div>
+          <form className="admin-form" onSubmit={async (event) => { event.preventDefault(); setBusy(true); setError(""); setNotice(""); try { const response = await fetch("/api/admin/servers", { method: "POST", headers: headers(), body: JSON.stringify({ id: server.id, ...form, stock_limit: Number(form.stock_limit), sort_order: Number(form.sort_order) }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error ?? "Could not save server."); setNotice("Server settings saved."); await load(initData); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save server."); } finally { setBusy(false); } }}>
+            <label>Display name<input required maxLength={80} value={form.name} onChange={(e) => setServerForms({ ...serverForms, [server.id]: { ...form, name: e.target.value } })} /></label>
+            <div className="admin-form-grid"><label>Region<select value={form.region} onChange={(e) => setServerForms({ ...serverForms, [server.id]: { ...form, region: e.target.value } })}><option value="Singapore">Singapore</option><option value="Other">Other</option></select></label><label>Stock limit<input required type="number" min="0" max="1000000" value={form.stock_limit} onChange={(e) => setServerForms({ ...serverForms, [server.id]: { ...form, stock_limit: e.target.value } })} /></label><label>Display order<input type="number" value={form.sort_order} onChange={(e) => setServerForms({ ...serverForms, [server.id]: { ...form, sort_order: e.target.value } })} /></label><label className="checkbox-label"><input type="checkbox" checked={form.active} onChange={(e) => setServerForms({ ...serverForms, [server.id]: { ...form, active: e.target.checked } })} /> Show to customers</label></div>
+            <button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Save server settings"}</button>
+          </form>
+        </article>; })}</div>
+      </section>
+
+      <section className="admin-panel">
+        <div className="section-heading"><div><p className="eyebrow">02 / PRODUCT CATALOG</p><h2>VPN packages</h2><p className="panel-note">Add the three packages customers can buy.</p></div></div>
         <div className="admin-items">{packages.map((item) => <article className={item.active ? "admin-item" : "admin-item inactive"} key={item.id}><div><b>{item.name}</b><p>{item.duration_days} days · {money(item.price_mmk)} · {item.active ? "Active" : "Inactive"}</p>{item.description && <small>{item.description}</small>}</div><div className="admin-item-actions"><button className="small-button" onClick={() => { setEditingPackage(item.id); setPackageForm({ name: item.name, description: item.description, duration_days: String(item.duration_days), price_mmk: String(item.price_mmk), active: item.active, sort_order: String(item.sort_order) }); }}>Edit</button>{item.active && <button className="small-button danger-button" disabled={busy} onClick={() => void deactivate("packages", item.id)}>Deactivate</button>}</div></article>)}</div>
         <form className="admin-form" onSubmit={savePackage}>
           <h3>{editingPackage ? "Edit package" : "Add a package"}</h3>
