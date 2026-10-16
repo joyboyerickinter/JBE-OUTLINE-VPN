@@ -8,10 +8,10 @@ declare global {
     Telegram?: { WebApp?: { initData: string; ready: () => void; expand: () => void; colorScheme?: string } };
   }
 }
-type PackageItem = { id: string; name: string; description: string; duration_days: number; price_mmk: number; active: boolean; sort_order: number };
+type PackageItem = { id: string; name: string; description: string; duration_days: number; price_mmk: number; data_limit_gb: number | null; active: boolean; sort_order: number };
 type PaymentItem = { id: string; provider: "KBZPay" | "AYAPay"; account_name: string; account_number: string; instructions: string; active: boolean; sort_order: number };
 type ServerItem = { id: string; name: string; region: string; env_slot: number; stock_limit: number; active: boolean; sort_order: number; active_keys: number; available_stock: number };
-const emptyPackage = { name: "", description: "", duration_days: "30", price_mmk: "", active: true, sort_order: "0" };
+const emptyPackage = { name: "", description: "", duration_days: "30", price_mmk: "", data_limit_gb: "", active: true, sort_order: "0" };
 const emptyPayment = { provider: "KBZPay" as "KBZPay" | "AYAPay", account_name: "", account_number: "", instructions: "", active: true, sort_order: "0" };
 const money = (amount: number) => new Intl.NumberFormat("en-US").format(amount) + " Ks";
 
@@ -22,6 +22,7 @@ export default function AdminPage() {
   const [servers, setServers] = useState<ServerItem[]>([]);
   const [serverForms, setServerForms] = useState<Record<string, { name: string; region: string; stock_limit: string; active: boolean; sort_order: string }>>({});
   const [packageForm, setPackageForm] = useState(emptyPackage);
+  const [stockForms, setStockForms] = useState<Record<string, string>>({});
   const [paymentForm, setPaymentForm] = useState(emptyPayment);
   const [editingPackage, setEditingPackage] = useState<string | null>(null);
   const [editingPayment, setEditingPayment] = useState<string | null>(null);
@@ -45,6 +46,17 @@ export default function AdminPage() {
       const loadedServers: ServerItem[] = serverData.servers ?? [];
       setServers(loadedServers);
       setServerForms(Object.fromEntries(loadedServers.map((server) => [server.id, { name: server.name, region: server.region, stock_limit: String(server.stock_limit), active: server.active, sort_order: String(server.sort_order) }])));
+      const stockResponse = await fetch("/api/admin/package-stock", { headers: { "x-telegram-init-data": raw }, cache: "no-store" });
+      const stockData = await stockResponse.json();
+      if (!stockResponse.ok) throw new Error(stockData.error ?? "Could not load package stock.");
+      const stockMap: Record<string, string> = {};
+      for (const pkg of (data.packages ?? []) as PackageItem[]) {
+        for (const server of loadedServers) {
+          const row = (stockData.rows ?? []).find((entry: { package_id: string; server_id: string; stock_limit: number }) => entry.package_id === pkg.id && entry.server_id === server.id);
+          stockMap[`${pkg.id}:${server.id}`] = String(row?.stock_limit ?? 0);
+        }
+      }
+      setStockForms(stockMap);
       setError("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load admin settings."); }
     finally { setLoading(false); }
@@ -63,7 +75,7 @@ export default function AdminPage() {
     try {
       const response = await fetch("/api/admin/packages", { method: "POST", headers: headers(), body: JSON.stringify({
         ...(editingPackage ? { id: editingPackage } : {}), ...packageForm,
-        duration_days: Number(packageForm.duration_days), price_mmk: Number(packageForm.price_mmk), sort_order: Number(packageForm.sort_order),
+        duration_days: Number(packageForm.duration_days), price_mmk: Number(packageForm.price_mmk), data_limit_gb: packageForm.data_limit_gb.trim() === "" ? null : Number(packageForm.data_limit_gb), sort_order: Number(packageForm.sort_order),
       }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not save package.");
@@ -118,18 +130,23 @@ export default function AdminPage() {
 
       <section className="admin-panel">
         <div className="section-heading"><div><p className="eyebrow">02 / PRODUCT CATALOG</p><h2>VPN packages</h2><p className="panel-note">Add the three packages customers can buy.</p></div></div>
-        <div className="admin-items">{packages.map((item) => <article className={item.active ? "admin-item" : "admin-item inactive"} key={item.id}><div><b>{item.name}</b><p>{item.duration_days} days · {money(item.price_mmk)} · {item.active ? "Active" : "Inactive"}</p>{item.description && <small>{item.description}</small>}</div><div className="admin-item-actions"><button className="small-button" onClick={() => { setEditingPackage(item.id); setPackageForm({ name: item.name, description: item.description, duration_days: String(item.duration_days), price_mmk: String(item.price_mmk), active: item.active, sort_order: String(item.sort_order) }); }}>Edit</button>{item.active && <button className="small-button danger-button" disabled={busy} onClick={() => void deactivate("packages", item.id)}>Deactivate</button>}</div></article>)}</div>
+        <div className="admin-items">{packages.map((item) => <article className={item.active ? "admin-item" : "admin-item inactive"} key={item.id}><div><b>{item.name}</b><p>{item.duration_days} days · {item.data_limit_gb == null ? "Unlimited data" : `${item.data_limit_gb} GB`} · {money(item.price_mmk)} · {item.active ? "Active" : "Inactive"}</p>{item.description && <small>{item.description}</small>}</div><div className="admin-item-actions"><button className="small-button" onClick={() => { setEditingPackage(item.id); setPackageForm({ name: item.name, description: item.description, duration_days: String(item.duration_days), price_mmk: String(item.price_mmk), data_limit_gb: item.data_limit_gb == null ? "" : String(item.data_limit_gb), active: item.active, sort_order: String(item.sort_order) }); }}>Edit</button>{item.active && <button className="small-button danger-button" disabled={busy} onClick={() => void deactivate("packages", item.id)}>Deactivate</button>}</div></article>)}</div>
         <form className="admin-form" onSubmit={savePackage}>
           <h3>{editingPackage ? "Edit package" : "Add a package"}</h3>
           <label>Package name<input required maxLength={80} value={packageForm.name} onChange={(e) => setPackageForm({ ...packageForm, name: e.target.value })} placeholder="e.g. 30-Day Plan" /></label>
           <label>Description<input maxLength={240} value={packageForm.description} onChange={(e) => setPackageForm({ ...packageForm, description: e.target.value })} placeholder="Short detail shown to customers" /></label>
-          <div className="admin-form-grid"><label>Duration (days)<input required type="number" min="1" max="3650" value={packageForm.duration_days} onChange={(e) => setPackageForm({ ...packageForm, duration_days: e.target.value })} /></label><label>Price (MMK)<input required type="number" min="0" step="1" value={packageForm.price_mmk} onChange={(e) => setPackageForm({ ...packageForm, price_mmk: e.target.value })} placeholder="Enter price" /></label><label>Display order<input type="number" value={packageForm.sort_order} onChange={(e) => setPackageForm({ ...packageForm, sort_order: e.target.value })} /></label><label className="checkbox-label"><input type="checkbox" checked={packageForm.active} onChange={(e) => setPackageForm({ ...packageForm, active: e.target.checked })} /> Show to customers</label></div>
+          <div className="admin-form-grid"><label>Duration (days)<input required type="number" min="1" max="3650" value={packageForm.duration_days} onChange={(e) => setPackageForm({ ...packageForm, duration_days: e.target.value })} /></label><label>Data limit (GB; blank = unlimited)<input type="number" min="1" max="1000000" value={packageForm.data_limit_gb} onChange={(e) => setPackageForm({ ...packageForm, data_limit_gb: e.target.value })} placeholder="Blank for unlimited" /></label><label>Price (MMK)<input required type="number" min="0" step="1" value={packageForm.price_mmk} onChange={(e) => setPackageForm({ ...packageForm, price_mmk: e.target.value })} placeholder="Enter price" /></label><label>Display order<input type="number" value={packageForm.sort_order} onChange={(e) => setPackageForm({ ...packageForm, sort_order: e.target.value })} /></label><label className="checkbox-label"><input type="checkbox" checked={packageForm.active} onChange={(e) => setPackageForm({ ...packageForm, active: e.target.checked })} /> Show to customers</label></div>
           <div className="form-actions"><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : editingPackage ? "Save changes" : "Add package"}</button>{editingPackage && <button type="button" className="small-button" onClick={() => { setEditingPackage(null); setPackageForm(emptyPackage); }}>Cancel edit</button>}</div>
         </form>
       </section>
 
+
       <section className="admin-panel">
-        <div className="section-heading"><div><p className="eyebrow">03 / PAYMENT METHODS</p><h2>KBZPay & AYA Pay</h2><p className="panel-note">These account details are shown to customers after they create an order.</p></div></div>
+        <div className="section-heading"><div><p className="eyebrow">03 / PACKAGE INVENTORY</p><h2>Stock by package and server</h2><p className="panel-note">Set the total number of active keys allowed for each package on each server. Use 0 to temporarily stop sales for that combination.</p></div></div>
+        {packages.length === 0 ? <p className="panel-note">Add a package first.</p> : <div className="admin-items">{packages.map(pkg => <article className="admin-item" key={pkg.id}><div><b>{pkg.name}</b><p>{pkg.data_limit_gb == null ? "Unlimited data" : pkg.data_limit_gb + " GB"} · {pkg.duration_days} days</p></div><div className="admin-form">{servers.map(server => { const key = `${pkg.id}:${server.id}`; return <form key={key} className="admin-form-grid" onSubmit={async event => { event.preventDefault(); setBusy(true); setError(""); setNotice(""); try { const response = await fetch("/api/admin/package-stock", { method: "POST", headers: headers(), body: JSON.stringify({ package_id: pkg.id, server_id: server.id, stock_limit: Number(stockForms[key] ?? 0) }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error ?? "Could not save stock."); setNotice(`Stock saved: ${pkg.name} · ${server.name}.`); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save stock."); } finally { setBusy(false); } }}><label>{server.name} ({server.region})<input type="number" min="0" max="1000000" required value={stockForms[key] ?? "0"} onChange={e => setStockForms({ ...stockForms, [key]: e.target.value })} /></label><button className="primary-button" type="submit" disabled={busy || !server.active}>{busy ? "Saving…" : "Save stock"}</button></form>; })}</div></article>)}</div>}
+      </section>
+      <section className="admin-panel">
+        <div className="section-heading"><div><p className="eyebrow">04 / PAYMENT METHODS</p><h2>KBZPay & AYA Pay</h2><p className="panel-note">These account details are shown to customers after they create an order.</p></div></div>
         <div className="admin-items">{payments.map((item) => <article className={item.active ? "admin-item" : "admin-item inactive"} key={item.id}><div><b>{item.provider} · {item.account_name}</b><p>{item.account_number} · {item.active ? "Active" : "Inactive"}</p>{item.instructions && <small>{item.instructions}</small>}</div><div className="admin-item-actions"><button className="small-button" onClick={() => { setEditingPayment(item.id); setPaymentForm({ provider: item.provider, account_name: item.account_name, account_number: item.account_number, instructions: item.instructions, active: item.active, sort_order: String(item.sort_order) }); }}>Edit</button>{item.active && <button className="small-button danger-button" disabled={busy} onClick={() => void deactivate("payments", item.id)}>Deactivate</button>}</div></article>)}</div>
         <form className="admin-form" onSubmit={savePayment}>
           <h3>{editingPayment ? "Edit payment account" : "Add a payment account"}</h3>
