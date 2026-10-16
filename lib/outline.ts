@@ -157,6 +157,22 @@ export async function createOutlineKey(slot: number, label: string): Promise<Out
   return { id: String(data.id), accessUrl: data.accessUrl };
 }
 
+export async function setOutlineKeyDataLimit(slot: number, keyId: string, dataLimitGb: number | null) {
+  // Outline's data-limit API expects bytes. NULL means Unlimited: do not set a limit.
+  if (dataLimitGb === null) return;
+  if (!Number.isInteger(dataLimitGb) || dataLimitGb <= 0) {
+    throw new Error("Package data limit must be a positive whole number of GB.");
+  }
+  const response = await outlineRequest(
+    slot,
+    `/access-keys/${encodeURIComponent(keyId)}/data-limit`,
+    { method: "PUT", body: { limit: { bytes: dataLimitGb * 1_000_000_000 } } },
+  );
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Outline server ${slot} could not set the ${dataLimitGb} GB data limit (HTTP ${response.status}).`);
+  }
+}
+
 export async function revokeOutlineKey(slot: number, keyId: string) {
   const response = await outlineRequest(
     slot,
