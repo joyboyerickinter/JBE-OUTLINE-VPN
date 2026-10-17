@@ -169,7 +169,14 @@ export async function setOutlineKeyDataLimit(slot: number, keyId: string, dataLi
     { method: "PUT", body: { limit: { bytes: dataLimitGb * 1_000_000_000 } } },
   );
   if (response.status < 200 || response.status >= 300) {
-    throw new Error(`Outline server ${slot} could not set the ${dataLimitGb} GB data limit (HTTP ${response.status}).`);
+    // Preserve the server's diagnostic message; older Outline servers may not
+    // support per-key data limits or may reject the request body.
+    const detail = response.body
+      .replace(/[\\r\\n\\t]+/g, " ")
+      .slice(0, 240);
+    throw new Error(
+      `Outline server ${slot} could not set the ${dataLimitGb} GB data limit (HTTP ${response.status})${detail ? `: ${detail}` : "."}`,
+    );
   }
 }
 
